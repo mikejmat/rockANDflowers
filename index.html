@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Chippy's Robot Adventure</title>
+    <style>
+      body {
+        margin: 0;
+        overflow: hidden;
+        font-family: Arial, sans-serif;
+      }
+      #game-container {
+        width: 100vw;
+        height: 100vh;
+      }
+      #control-panel {
+        position: absolute;
+        top: 10px;
+        right: 10px;
+        background: rgba(255, 255, 255, 0.8);
+        padding: 10px;
+        border-radius: 5px;
+      }
+      .slider-container {
+        margin-bottom: 10px;
+      }
+      input[type="range"] {
+        width: 200px;
+      }
+      #game-over {
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        font-size: 48px;
+        color: red;
+        display: none;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="game-container"></div>
+    <div id="control-panel">
+      <div class="slider-container">
+        <label for="rock-distance"
+          >Distance between rocks: <span id="rock-distance-value"></span
+        ></label>
+        <input
+          type="range"
+          id="rock-distance"
+          min="100"
+          max="500"
+          value="500"
+        />
+      </div>
+      <div class="slider-container">
+        <label for="scroll-speed"
+          >Scroll speed: <span id="scroll-speed-value"></span
+        ></label>
+        <input type="range" id="scroll-speed" min="1" max="10" value="5" />
+      </div>
+      <div class="slider-container">
+        <label for="rock-size"
+          >Rock size: <span id="rock-size-value"></span
+        ></label>
+        <input
+          type="range"
+          id="rock-size"
+          min="1"
+          max="1"
+          step="0.1"
+          value="1"
+        />
+      </div>
+      <div class="slider-container">
+        <label for="jump-height"
+          >Jump height: <span id="jump-height-value"></span
+        ></label>
+        <input type="range" id="jump-height" min="50" max="500" value="250" />
+      </div>
+    </div>
+    <div id="game-over">GAME OVER</div>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/svg.js/3.1.2/svg.min.js"></script>
+    <script>
+      const game = SVG().addTo("#game-container").size("100%", "100%");
+      const gameWidth = window.innerWidth;
+      const gameHeight = window.innerHeight;
+      const groundY = gameHeight - 50;
+
+      // Game state
+      let score = 0;
+      let isJumping = false;
+      let gameObjects = [];
+      let lastRockDistance = 0;
+      let isGameOver = false;
+
+      // Game parameters (now controlled by sliders)
+      let rockDistance = 500;
+      let scrollSpeed = 5;
+      let rockSize = 1;
+      let jumpHeight = 250;
+
+      // Create Chippy (the robot)
+      function createChippy() {
+        const chippyGroup = game.group();
+
+        // Body
+        chippyGroup.rect(60, 80).fill("white").stroke("#FF0000").move(0, 20);
+
+        // Head
+        chippyGroup.rect(40, 40).fill("#FF0000").move(10, 0);
+
+        // Eyes
+        chippyGroup.rect(10, 5).fill("white").move(20, 15);
+        chippyGroup.rect(10, 5).fill("white").move(35, 15);
+
+        // Arms
+        chippyGroup.path("M0,40 H-20").stroke({ color: "#FF0000", width: 5 });
+        chippyGroup.path("M60,40 H80").stroke({ color: "#FF0000", width: 5 });
+
+        // Legs
+        chippyGroup.path("M15,100 V120").stroke({ color: "#FF0000", width: 5 });
+        chippyGroup.path("M45,100 V120").stroke({ color: "#FF0000", width: 5 });
+
+        // Colored squares
+        chippyGroup.rect(10, 10).fill("#00FF00").move(15, 40);
+        chippyGroup.rect(10, 10).fill("#FFFF00").move(25, 40);
+        chippyGroup.rect(10, 10).fill("#0000FF").move(35, 40);
+
+        return chippyGroup;
+      }
+
+      const chippy = createChippy().move(100, groundY - 120);
+
+      // Create ground
+      const ground = game.rect(gameWidth, 50).fill("#228B22").move(0, groundY);
+
+      // Create score display
+      const scoreText = game
+        .text(score.toString())
+        .move(20, 20)
+        .font({ size: 24, family: "Arial" });
+
+      function createRock() {
+        const rockGroup = game.group();
+
+        // Main shape
+        rockGroup.polygon("0,40 20,0 60,0 80,40").fill("#808080");
+
+        // Dark spots
+        rockGroup.circle(15).fill("#404040").move(20, 15);
+        rockGroup.circle(10).fill("#404040").move(50, 25);
+
+        rockGroup.move(gameWidth, groundY - 40 * rockSize).scale(rockSize);
+        return rockGroup;
+      }
+
+      function createFlower() {
+        const flowerGroup = game.group();
+
+        // Stem
+        flowerGroup
+          .path("M0,40 Q10,20 0,0")
+          .fill("none")
+          .stroke({ color: "#4CAF50", width: 5 });
+
+        // Petals
+        const petalColor = "#FF69B4";
+        flowerGroup.path("M0,0 Q-10,-10 0,-20 Q10,-10 0,0").fill(petalColor);
+        flowerGroup.path("M0,0 Q10,-10 20,0 Q10,10 0,0").fill(petalColor);
+        flowerGroup.path("M0,0 Q-10,10 -20,0 Q-10,-10 0,0").fill(petalColor);
+        flowerGroup.path("M0,0 Q10,10 0,20 Q-10,10 0,0").fill(petalColor);
+
+        // Center
+        flowerGroup.circle(10).fill("#FFFF00").center(0, 0);
+
+        flowerGroup.move(gameWidth, groundY - 60);
+        return flowerGroup;
+      }
+
+      function jump() {
+        if (!isJumping && !isGameOver) {
+          isJumping = true;
+          chippy
+            .animate(400 + jumpHeight)
+            .dy(-jumpHeight)
+            .after(() => {
+              chippy
+                .animate(400 + jumpHeight)
+                .dy(jumpHeight)
+                .after(() => {
+                  isJumping = false;
+                });
+            });
+        }
+      }
+
+      function checkCollision(object) {
+        const chippyBox = chippy.bbox();
+        const objectBox = object.element.bbox();
+
+        return !(
+          chippyBox.x > objectBox.x2 ||
+          chippyBox.x2 < objectBox.x ||
+          chippyBox.y > objectBox.y2 ||
+          chippyBox.y2 < objectBox.y
+        );
+      }
+
+      function endGame() {
+        isGameOver = true;
+        document.getElementById("game-over").style.display = "block";
+      }
+
+      function gameLoop() {
+        if (isGameOver) return;
+
+        // Clear previous frame
+        game.clear();
+
+        // Redraw ground and score
+        ground.addTo(game);
+        scoreText.text(score.toString()).addTo(game);
+
+        // Redraw Chippy
+        chippy.addTo(game);
+
+        // Move and check game objects
+        gameObjects = gameObjects.filter((object) => {
+          object.element.dx(-scrollSpeed);
+          if (checkCollision(object)) {
+            if (object.type === "rock") {
+              // Collision with rock - end game
+              endGame();
+              return false;
+            } else if (object.type === "flower") {
+              // Collect flower
+              score++;
+              return false; // Remove flower
+            }
+          }
+          if (
+            object.element.cx() < chippy.cx() &&
+            object.type === "flower" &&
+            !object.passed
+          ) {
+            // Missed flower
+            score = Math.max(0, score - 1); // Ensure score doesn't go below 0
+            object.passed = true;
+          }
+          if (object.element.cx() < -50) {
+            return false; // Remove off-screen object
+          }
+          object.element.addTo(game);
+          return true;
+        });
+
+        // Spawn new objects
+        lastRockDistance += scrollSpeed;
+        if (lastRockDistance >= rockDistance) {
+          if (Math.random() < 0.7) {
+            gameObjects.push({ type: "rock", element: createRock() });
+          } else {
+            gameObjects.push({
+              type: "flower",
+              element: createFlower(),
+              passed: false,
+            });
+          }
+          lastRockDistance = 0;
+        }
+
+        requestAnimationFrame(gameLoop);
+      }
+
+      // Event listeners
+      document.addEventListener("keydown", (e) => {
+        if (e.code === "Space") {
+          if (isGameOver) {
+            // Restart game
+            isGameOver = false;
+            score = 0;
+            gameObjects = [];
+            document.getElementById("game-over").style.display = "none";
+          } else {
+            jump();
+          }
+        }
+      });
+
+      // Slider controls
+      document
+        .getElementById("rock-distance")
+        .addEventListener("input", function () {
+          rockDistance = parseInt(this.value);
+          document.getElementById("rock-distance-value").textContent =
+            rockDistance;
+        });
+
+      document
+        .getElementById("scroll-speed")
+        .addEventListener("input", function () {
+          scrollSpeed = parseInt(this.value);
+          document.getElementById("scroll-speed-value").textContent =
+            scrollSpeed;
+        });
+
+      document
+        .getElementById("rock-size")
+        .addEventListener("input", function () {
+          rockSize = parseFloat(this.value);
+          document.getElementById("rock-size-value").textContent =
+            rockSize.toFixed(1);
+        });
+
+      document
+        .getElementById("jump-height")
+        .addEventListener("input", function () {
+          jumpHeight = parseInt(this.value);
+          document.getElementById("jump-height-value").textContent = jumpHeight;
+        });
+
+      // Initialize slider values
+      document.getElementById("rock-distance-value").textContent = rockDistance;
+      document.getElementById("scroll-speed-value").textContent = scrollSpeed;
+      document.getElementById("rock-size-value").textContent =
+        rockSize.toFixed(1);
+      document.getElementById("jump-height-value").textContent = jumpHeight;
+
+      // Start the game
+      gameLoop();
+    </script>
+  </body>
+</html>
